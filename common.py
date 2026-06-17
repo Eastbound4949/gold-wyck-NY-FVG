@@ -10,6 +10,7 @@ import requests
 import numpy as np
 import pandas as pd
 import time as _time
+import random as _random
 import yfinance as yf
 from contextlib import contextmanager
 
@@ -205,7 +206,9 @@ def _flatten(raw: pd.DataFrame) -> pd.DataFrame:
 
 
 def _yf_download(ticker: str, period: str, interval: str, **kwargs) -> pd.DataFrame:
-    """yfinance download with 3 retries and 20s/40s/60s backoff on rate-limit errors."""
+    """yfinance download with jitter + 3 retries (30/60/90s backoff) on rate-limit errors.
+    Jitter spreads concurrent bot requests across a 20s window to avoid simultaneous hits."""
+    _time.sleep(_random.uniform(0, 20))  # stagger vs other Railway bots on same IP
     for attempt in range(4):
         try:
             raw = yf.download(ticker, period=period, interval=interval, **kwargs)
@@ -215,7 +218,7 @@ def _yf_download(ticker: str, period: str, interval: str, **kwargs) -> pd.DataFr
             if attempt == 3:
                 log.warning("yfinance %s failed after 4 attempts: %s", ticker, e)
                 return pd.DataFrame()
-            wait = 20 * (attempt + 1)
+            wait = 30 * (attempt + 1)  # 30s, 60s, 90s
             log.warning("yfinance %s attempt %d failed (%s) — retry in %ds", ticker, attempt + 1, e, wait)
             _time.sleep(wait)
     return pd.DataFrame()
