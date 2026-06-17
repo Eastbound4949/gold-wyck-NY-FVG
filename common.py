@@ -9,6 +9,7 @@ import logging
 import requests
 import numpy as np
 import pandas as pd
+import time as _time
 import yfinance as yf
 from contextlib import contextmanager
 
@@ -203,14 +204,31 @@ def _flatten(raw: pd.DataFrame) -> pd.DataFrame:
     return raw.dropna()
 
 
+def _yf_download(ticker: str, period: str, interval: str, **kwargs) -> pd.DataFrame:
+    """yfinance download with 3 retries and 20s/40s/60s backoff on rate-limit errors."""
+    for attempt in range(4):
+        try:
+            raw = yf.download(ticker, period=period, interval=interval, **kwargs)
+            if raw is not None and not raw.empty:
+                return raw
+        except Exception as e:
+            if attempt == 3:
+                log.warning("yfinance %s failed after 4 attempts: %s", ticker, e)
+                return pd.DataFrame()
+            wait = 20 * (attempt + 1)
+            log.warning("yfinance %s attempt %d failed (%s) — retry in %ds", ticker, attempt + 1, e, wait)
+            _time.sleep(wait)
+    return pd.DataFrame()
+
+
 def fetch_gc_daily(bars: int = 60) -> pd.DataFrame:
-    raw = yf.download("GC=F", period="90d", interval="1d", progress=False, auto_adjust=True)
+    raw = _yf_download("GC=F", period="90d", interval="1d", progress=False, auto_adjust=True)
     df  = _flatten(raw)
     return df.iloc[:-1] if len(df) > 1 else df   # drop potentially incomplete bar
 
 
 def fetch_btc_1h(days: int = 5) -> pd.DataFrame:
-    raw = yf.download("BTC-USD", period=f"{days}d", interval="1h", progress=False, auto_adjust=True)
+    raw = _yf_download("BTC-USD", period=f"{days}d", interval="1h", progress=False, auto_adjust=True)
     df  = _flatten(raw)
     df.index = pd.to_datetime(df.index, utc=True)
     return df.iloc[:-1] if len(df) > 1 else df
@@ -219,7 +237,7 @@ def fetch_btc_1h(days: int = 5) -> pd.DataFrame:
 def fetch_spy_1h(days: int = 5) -> pd.DataFrame:
     import pytz
     ET  = pytz.timezone("America/New_York")
-    raw = yf.download("SPY", period=f"{days}d", interval="1h", progress=False, auto_adjust=True)
+    raw = _yf_download("SPY", period=f"{days}d", interval="1h", progress=False, auto_adjust=True)
     df  = _flatten(raw)
     df.index = pd.to_datetime(df.index, utc=True).tz_convert(ET)
     return df.iloc[:-1] if len(df) > 1 else df
@@ -228,7 +246,7 @@ def fetch_spy_1h(days: int = 5) -> pd.DataFrame:
 def fetch_gc_15m(days: int = 5) -> pd.DataFrame:
     import pytz
     ET  = pytz.timezone("America/New_York")
-    raw = yf.download("GC=F", period=f"{days}d", interval="15m", progress=False, auto_adjust=True)
+    raw = _yf_download("GC=F", period=f"{days}d", interval="15m", progress=False, auto_adjust=True)
     df  = _flatten(raw)
     df.index = pd.to_datetime(df.index, utc=True).tz_convert(ET)
     return df.iloc[:-1] if len(df) > 1 else df
