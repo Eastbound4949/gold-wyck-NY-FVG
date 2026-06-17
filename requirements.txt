@@ -1,5 +1,5 @@
 apscheduler==3.10.4
-yfinance==0.2.54
+ccxt==4.3.89
 pandas==2.2.2
 numpy==1.26.4
 requests==2.32.3

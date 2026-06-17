@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import time as _time
 import random as _random
-import yfinance as yf
+import ccxt
 from contextlib import contextmanager
 
 # ── CONFIG ───────────────────────────────────────────────────────────────────
@@ -28,6 +28,7 @@ RISK_PCT = {
 
 TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TG_CHAT  = os.getenv("TELEGRAM_CHAT_ID",   "")
+TD_KEY   = os.getenv("TWELVE_DATA_KEY",    "")   # twelvedata.com free tier (800 req/day)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -198,60 +199,87 @@ def save_state(name: str, state: dict):
         json.dump(state, f, indent=2, default=str)
 
 # ── DATA FETCHERS ─────────────────────────────────────────────────────────────
-def _flatten(raw: pd.DataFrame) -> pd.DataFrame:
-    if isinstance(raw.columns, pd.MultiIndex):
-        raw.columns = raw.columns.get_level_values(0)
-    raw.columns = [str(c).lower() for c in raw.columns]
-    return raw.dropna()
+# Sources:
+#   GC=F daily / GC=F 15m / SPY 1h  →  Twelve Data (TD_KEY env var, free 800 req/day)
+#   BTC-USD 1h                       →  ccxt KuCoin (public OHLCV, no key required)
+# Note: Twelve Data returns XAU/USD (spot gold) as proxy for GC=F. Price difference
+# is the futures basis (~$5-20), negligible for paper-trading signal detection.
+
+_TD_BASE = "https://api.twelvedata.com/time_series"
 
 
-def _yf_download(ticker: str, period: str, interval: str, **kwargs) -> pd.DataFrame:
-    """yfinance download with jitter + 3 retries (30/60/90s backoff) on rate-limit errors.
-    Jitter spreads concurrent bot requests across a 20s window to avoid simultaneous hits."""
-    _time.sleep(_random.uniform(0, 20))  # stagger vs other Railway bots on same IP
-    for attempt in range(4):
-        try:
-            raw = yf.download(ticker, period=period, interval=interval, **kwargs)
-            if raw is not None and not raw.empty:
-                return raw
-        except Exception as e:
-            if attempt == 3:
-                log.warning("yfinance %s failed after 4 attempts: %s", ticker, e)
-                return pd.DataFrame()
-            wait = 30 * (attempt + 1)  # 30s, 60s, 90s
-            log.warning("yfinance %s attempt %d failed (%s) — retry in %ds", ticker, attempt + 1, e, wait)
-            _time.sleep(wait)
-    return pd.DataFrame()
+def _td_fetch(symbol: str, interval: str, outputsize: int) -> pd.DataFrame:
+    """Fetch OHLCV from Twelve Data. Returns empty DataFrame on any failure."""
+    if not TD_KEY:
+        log.warning("TWELVE_DATA_KEY not set — cannot fetch %s", symbol)
+        return pd.DataFrame()
+    params = {
+        "symbol":     symbol,
+        "interval":   interval,
+        "outputsize": outputsize,
+        "apikey":     TD_KEY,
+        "format":     "JSON",
+        "order":      "ASC",
+    }
+    try:
+        resp = requests.get(_TD_BASE, params=params, timeout=20)
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("status") == "error":
+            log.warning("Twelve Data %s: %s", symbol, data.get("message", "unknown error"))
+            return pd.DataFrame()
+        rows = data.get("values", [])
+        if not rows:
+            log.warning("Twelve Data %s: empty response", symbol)
+            return pd.DataFrame()
+        df = pd.DataFrame(rows)
+        df["datetime"] = pd.to_datetime(df["datetime"], utc=True)
+        df = df.set_index("datetime").sort_index()
+        for col in ["open", "high", "low", "close", "volume"]:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+        return df[["open", "high", "low", "close"]].dropna()
+    except Exception as e:
+        log.warning("Twelve Data %s failed: %s", symbol, e)
+        return pd.DataFrame()
 
 
 def fetch_gc_daily(bars: int = 60) -> pd.DataFrame:
-    raw = _yf_download("GC=F", period="90d", interval="1d", progress=False, auto_adjust=True)
-    df  = _flatten(raw)
+    df = _td_fetch("XAU/USD", "1day", outputsize=bars + 2)
     return df.iloc[:-1] if len(df) > 1 else df   # drop potentially incomplete bar
 
 
 def fetch_btc_1h(days: int = 5) -> pd.DataFrame:
-    raw = _yf_download("BTC-USD", period=f"{days}d", interval="1h", progress=False, auto_adjust=True)
-    df  = _flatten(raw)
-    df.index = pd.to_datetime(df.index, utc=True)
-    return df.iloc[:-1] if len(df) > 1 else df
+    """BTC-USD 1H via ccxt KuCoin public API — no key, no rate limits."""
+    try:
+        ex    = ccxt.kucoin()
+        ohlcv = ex.fetch_ohlcv("BTC/USDT", "1h", limit=days * 25)
+        df    = pd.DataFrame(ohlcv, columns=["ts", "open", "high", "low", "close", "volume"])
+        df.index = pd.to_datetime(df["ts"], unit="ms", utc=True)
+        df    = df[["open", "high", "low", "close"]].dropna()
+        return df.iloc[:-1] if len(df) > 1 else df
+    except Exception as e:
+        log.warning("ccxt KuCoin BTC failed: %s", e)
+        return pd.DataFrame()
 
 
 def fetch_spy_1h(days: int = 5) -> pd.DataFrame:
     import pytz
-    ET  = pytz.timezone("America/New_York")
-    raw = _yf_download("SPY", period=f"{days}d", interval="1h", progress=False, auto_adjust=True)
-    df  = _flatten(raw)
-    df.index = pd.to_datetime(df.index, utc=True).tz_convert(ET)
+    ET = pytz.timezone("America/New_York")
+    df = _td_fetch("SPY", "1h", outputsize=days * 8)   # ~7 trading hrs/day
+    if df.empty:
+        return df
+    df.index = df.index.tz_convert(ET)
     return df.iloc[:-1] if len(df) > 1 else df
 
 
 def fetch_gc_15m(days: int = 5) -> pd.DataFrame:
     import pytz
-    ET  = pytz.timezone("America/New_York")
-    raw = _yf_download("GC=F", period=f"{days}d", interval="15m", progress=False, auto_adjust=True)
-    df  = _flatten(raw)
-    df.index = pd.to_datetime(df.index, utc=True).tz_convert(ET)
+    ET = pytz.timezone("America/New_York")
+    df = _td_fetch("XAU/USD", "15min", outputsize=days * 100)  # ~96 bars/day for 24h forex
+    if df.empty:
+        return df
+    df.index = df.index.tz_convert(ET)
     return df.iloc[:-1] if len(df) > 1 else df
 
 # ── TELEGRAM ──────────────────────────────────────────────────────────────────
