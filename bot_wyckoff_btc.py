@@ -63,7 +63,7 @@ def run():
         log.warning("Insufficient BTC-USD 1H data")
         return
 
-    now_utc   = pd.Timestamp.utcnow().tz_localize(UTC)
+    now_utc   = pd.Timestamp.now(tz=UTC)
     today     = now_utc.date()
     yesterday = today - timedelta(days=1)
 
