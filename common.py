@@ -85,6 +85,13 @@ def init_db():
                 logged_at  TEXT DEFAULT (datetime('now'))
             );
         """)
+    # Seed balance rows so strategies show in DB even before first trade closes
+    with _db() as con:
+        for strategy in RISK_PCT:
+            con.execute("""
+                INSERT OR IGNORE INTO balances (strategy, balance, updated_at)
+                VALUES (?, ?, datetime('now'))
+            """, (strategy, INITIAL_BALANCE))
     log.info("DB ready: %s", DB_PATH)
 
 
