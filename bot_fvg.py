@@ -18,6 +18,7 @@ INSTRUMENT     = "GC=F"
 RR             = 5.0
 FILL_THRESHOLD = 0.50
 MAX_WAIT       = 16
+MIN_SL_PTS     = 2.0   # XAUUSD 15m typical spread ~$0.30-0.50; <2pt SL = noise
 
 ET  = pytz.timezone("America/New_York")
 log = logging.getLogger(STRATEGY)
@@ -97,7 +98,7 @@ def run():
             entry_ts = pd.Timestamp.min.tz_localize(ET)
 
         since    = df[df.index > entry_ts]
-        wait_cnt = state.get("wait_bars", 0) + len(since)
+        wait_cnt = len(since)   # bars elapsed since entry; don't accumulate state (causes double-count)
 
         for idx, bar in since.iterrows():
             date_str = str(idx.date())
@@ -155,7 +156,8 @@ def run():
             entry = fvg["fill_level"]
             sl    = fvg["gap_bot"]
             risk  = entry - sl
-            if risk <= 0:
+            if risk < MIN_SL_PTS:
+                log.info("FVG LONG skipped: SL dist %.2f < MIN_SL_PTS %.2f", risk, MIN_SL_PTS)
                 return
             tp  = entry + RR * risk
             pos = {
@@ -175,7 +177,8 @@ def run():
             entry = fvg["fill_level"]
             sl    = fvg["gap_top"]
             risk  = sl - entry
-            if risk <= 0:
+            if risk < MIN_SL_PTS:
+                log.info("FVG SHORT skipped: SL dist %.2f < MIN_SL_PTS %.2f", risk, MIN_SL_PTS)
                 return
             tp  = entry - RR * risk
             pos = {
