@@ -77,7 +77,10 @@ def run():
 
     prev_high = float(daily.loc[yest_ts, "high"])
     prev_low  = float(daily.loc[yest_ts, "low"])
-    bias      = daily.loc[today_ts, "bias"] if today_ts in daily.index else "UP"
+    # Use yesterday's COMPLETED daily close vs EMA20 — not today's partial bar.
+    # Today's bar at 2 AM UTC has only 2h of data; partial close can flip bias
+    # falsely (caused consecutive short SLs June 20-21 while BTC in uptrend).
+    bias      = daily.loc[yest_ts, "bias"] if yest_ts in daily.index else "UP"
 
     # ATR from last 48 bars
     recent = df.tail(48)
