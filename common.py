@@ -271,12 +271,30 @@ def fetch_btc_1h(days: int = 5) -> pd.DataFrame:
 
 
 def fetch_spy_1h(days: int = 5) -> pd.DataFrame:
+    """S&P 500 1H bars. Instrument switched SPY -> ^GSPC (index) 2026-07-08:
+    user cannot trade SPY (UK PRIIPs), broker venue = SP500 index CFD.
+    TwelveData index symbols (SPX/US500) are paid-tier, so this uses yfinance.
+    All downstream math is ATR/%-based — no absolute-price constants to scale."""
     import pytz
+    import yfinance as yf
     ET = pytz.timezone("America/New_York")
-    df = _td_fetch("SPY", "1h", outputsize=days * 8)   # ~7 trading hrs/day
-    if df.empty:
-        return df
+    symbol = os.getenv("NY_OPEN_SYMBOL", "^GSPC")
+    try:
+        df = yf.download(symbol, period=f"{days}d", interval="1h",
+                         auto_adjust=True, progress=False)
+    except Exception as e:
+        log.warning("yfinance %s 1h fetch failed: %s", symbol, e)
+        return pd.DataFrame()
+    if df is None or df.empty:
+        return pd.DataFrame()
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = [c[0].lower() for c in df.columns]
+    else:
+        df.columns = [str(c).lower() for c in df.columns]
+    if df.index.tz is None:
+        df.index = df.index.tz_localize("UTC")
     df.index = df.index.tz_convert(ET)
+    df = df[["open", "high", "low", "close"]].dropna()
     return df.iloc[:-1] if len(df) > 1 else df
 
 

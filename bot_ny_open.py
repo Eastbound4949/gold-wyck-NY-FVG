@@ -4,6 +4,7 @@ Strategy: SPY 1H ORB state machine (break → retest → entry). Long-only.
 Params: ATR(20), RR=4.0, retest_tol=0.6, sl_mult=0.75. Risk 1%.
 """
 import logging
+import os
 import numpy as np
 import pandas as pd
 from datetime import datetime
@@ -15,7 +16,7 @@ from common import (
 )
 
 STRATEGY   = "NY_OPEN_BR"
-INSTRUMENT = "SPY"
+INSTRUMENT = os.getenv("NY_OPEN_SYMBOL", "^GSPC")
 RR         = 4.0
 ATR_PERIOD = 20
 RETEST_TOL = 0.6
@@ -63,7 +64,7 @@ def run():
     state = load_state(STRATEGY)
     df    = fetch_spy_1h(days=5)
     if df.empty or len(df) < 5:
-        log.warning("Insufficient SPY 1H data")
+        log.warning("Insufficient S&P500 1H data")
         return
 
     today     = now_et.date()
