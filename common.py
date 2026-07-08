@@ -126,12 +126,15 @@ def fix_ny_open_migration_artifact_20260708():
     ^GSPC bar (7500+) fake-filled its TP at 754.71 for +4.00R +$400 at 13:35 UTC.
     Honest treatment (same as avwap): the position was force-closed by the
     migration at SPY's 2026-07-07 session close (747.71). Rewrites that trade
-    row + the NY_OPEN_BR balance. No-op once exit_type is rewritten."""
+    row + the NY_OPEN_BR balance. No-op once exit_type is rewritten. NOTE: the
+    artifact row's exit_time reads '2026-06-30' — commit-1's naive-UTC index made
+    the first ^GSPC bar (07-01 00:00 UTC) stamp as ET date 06-30 — so match on
+    the entry price, not the date."""
     with _db() as c:
         row = c.execute(
             """SELECT id, entry, sl, risk_dollar FROM trades
                WHERE strategy='NY_OPEN_BR' AND exit_type='TP' AND entry < 2000
-                 AND date(exit_time) >= '2026-07-08' LIMIT 1""").fetchone()
+                 AND ABS(entry - 740.895) < 0.01 LIMIT 1""").fetchone()
         if row is None:
             for r in c.execute("SELECT id, trade_date, entry_time, exit_time, entry, sl, tp, exit_price, exit_type, pnl_dollar, balance_after FROM trades WHERE strategy='NY_OPEN_BR'").fetchall():
                 log.warning("NY_OPEN_BR row (fix found no match): %s", r)
