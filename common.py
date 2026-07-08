@@ -275,25 +275,16 @@ def fetch_spy_1h(days: int = 5) -> pd.DataFrame:
     user cannot trade SPY (UK PRIIPs), broker venue = SP500 index CFD.
     TwelveData index symbols (SPX/US500) are paid-tier, so this uses yfinance.
     All downstream math is ATR/%-based — no absolute-price constants to scale."""
-    import pytz
-    import yfinance as yf
-    ET = pytz.timezone("America/New_York")
+    import yahoo_chart
     symbol = os.getenv("NY_OPEN_SYMBOL", "^GSPC")
     try:
-        df = yf.download(symbol, period=f"{days}d", interval="1h",
-                         auto_adjust=True, progress=False)
+        df = yahoo_chart.fetch(symbol, "1h", days + 3)
     except Exception as e:
-        log.warning("yfinance %s 1h fetch failed: %s", symbol, e)
+        log.warning("yahoo_chart %s 1h fetch failed: %s", symbol, e)
         return pd.DataFrame()
-    if df is None or df.empty:
+    if df.empty:
         return pd.DataFrame()
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = [c[0].lower() for c in df.columns]
-    else:
-        df.columns = [str(c).lower() for c in df.columns]
-    if df.index.tz is None:
-        df.index = df.index.tz_localize("UTC")
-    df.index = df.index.tz_convert(ET)
+    df.columns = [str(c).lower() for c in df.columns]
     df = df[["open", "high", "low", "close"]].dropna()
     return df.iloc[:-1] if len(df) > 1 else df
 
