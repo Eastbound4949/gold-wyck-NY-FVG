@@ -60,7 +60,7 @@ def _close(state: dict, pos: dict, exit_price: float, reason: str, date_str: str
     update_balance(STRATEGY, new_bal)
     log_trade(
         strategy=STRATEGY, trade_date=pos["entry_date"],
-        entry_time=pos["entry_date"], exit_time=date_str,
+        entry_time=pos.get("entry_time", pos["entry_date"]), exit_time=date_str,
         direction=direction, instrument=INSTRUMENT,
         entry=pos["entry"], sl=pos["sl"], tp=pos["tp"],
         exit_price=exit_price, exit_type=reason,
@@ -91,7 +91,10 @@ def run():
     if state.get("position"):
         pos      = state["position"]
         entry_dt = pd.Timestamp(pos["entry_date"])
-        since    = df[pd.to_datetime(df.index).normalize() > entry_dt]
+        idx      = pd.to_datetime(df.index)
+        if getattr(idx, "tz", None) is not None and entry_dt.tzinfo is None:
+            entry_dt = entry_dt.tz_localize(idx.tz)
+        since    = df[idx.normalize() > entry_dt]
         for _, bar in since.iterrows():
             if pos["direction"] == "long":
                 if bar["low"] <= pos["sl"]:
@@ -141,7 +144,8 @@ def run():
                 tp  = entry + RR * risk
                 pos = {
                     "direction": "long", "entry": entry, "sl": sl, "tp": tp,
-                    "entry_date": today_str, "risk_dollar": risk_dollar,
+                    "entry_date": today_str, "entry_time": today_str,
+                    "risk_dollar": risk_dollar,
                     "balance_at_entry": balance,
                 }
                 state["position"]      = pos
@@ -163,7 +167,8 @@ def run():
                 tp  = entry - RR * risk
                 pos = {
                     "direction": "short", "entry": entry, "sl": sl, "tp": tp,
-                    "entry_date": today_str, "risk_dollar": risk_dollar,
+                    "entry_date": today_str, "entry_time": today_str,
+                    "risk_dollar": risk_dollar,
                     "balance_at_entry": balance,
                 }
                 state["position"]       = pos
