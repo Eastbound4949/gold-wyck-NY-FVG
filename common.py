@@ -120,6 +120,39 @@ def update_balance(strategy: str, val: float):
         )
 
 
+def fix_ny_open_migration_artifact_20260708():
+    """One-time correction. NY_OPEN_BR carried an untracked OPEN LONG @ 740.895
+    (SPY units, sl 737.44) into the 2026-07-08 SPY->^GSPC switch; the first
+    ^GSPC bar (7500+) fake-filled its TP at 754.71 for +4.00R +$400 at 13:35 UTC.
+    Honest treatment (same as avwap): the position was force-closed by the
+    migration at SPY's 2026-07-07 session close (747.71). Rewrites that trade
+    row + the NY_OPEN_BR balance. No-op once exit_type is rewritten."""
+    with _db() as c:
+        row = c.execute(
+            """SELECT id, entry, sl, risk_dollar FROM trades
+               WHERE strategy='NY_OPEN_BR' AND exit_type='TP' AND entry < 2000
+                 AND date(exit_time) >= '2026-07-08' LIMIT 1""").fetchone()
+        if row is None:
+            return
+        trade_id, entry, sl, risk_dollar = row
+        spy_close_0707 = 747.71  # SPY 2026-07-07 official close (fixed constant:
+        # in-container yfinance is broken for some tickers and this must not
+        # depend on a live fetch to converge)
+        risk_dist = entry - sl
+        pnl_r = (spy_close_0707 - entry) / risk_dist if risk_dist > 0 else 0.0
+        pnl_dollar = round(pnl_r * risk_dollar, 2)
+        bal_after = round(INITIAL_BALANCE + pnl_dollar, 2)  # NY_OPEN had no prior closes
+        c.execute("""UPDATE trades SET exit_price=?, pnl_r=?, pnl_dollar=?,
+                     balance_after=?, exit_type=? WHERE id=?""",
+                  (spy_close_0707, round(pnl_r, 4), pnl_dollar, bal_after,
+                   "MIGRATION-CLOSE (SPY->^GSPC 2026-07-08; artifact TP@754.71 +$400 voided)",
+                   trade_id))
+        c.execute("UPDATE balances SET balance=?, updated_at=datetime('now') WHERE strategy='NY_OPEN_BR'",
+                  (bal_after,))
+    log.warning("NY_OPEN_BR artifact fix: trade #%d rewritten — exit %.2f, pnl %.2fR ($%.2f), balance %.2f",
+                trade_id, spy_close_0707, pnl_r, pnl_dollar, bal_after)
+
+
 def log_trade(strategy, trade_date, entry_time, exit_time, direction, instrument,
               entry, sl, tp, exit_price, exit_type, pnl_dollar, pnl_r, risk_dollar, balance_after):
     with _db() as con:

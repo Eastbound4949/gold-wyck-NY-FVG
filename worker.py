@@ -18,7 +18,7 @@ logging.basicConfig(
     stream=sys.stdout,
 )
 
-from common import init_db, get_balance, bot_started, INITIAL_BALANCE, load_state, DB_PATH, STATE_DIR
+from common import init_db, fix_ny_open_migration_artifact_20260708, get_balance, bot_started, INITIAL_BALANCE, load_state, DB_PATH, STATE_DIR
 import bot_gold
 import bot_wyckoff_btc
 import bot_ny_open
@@ -49,6 +49,7 @@ def main():
     print("=" * 60)
 
     init_db()
+    fix_ny_open_migration_artifact_20260708()
 
     for key, desc in STRATEGIES.items():
         bal = get_balance(key)
