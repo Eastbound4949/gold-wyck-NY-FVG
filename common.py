@@ -133,6 +133,8 @@ def fix_ny_open_migration_artifact_20260708():
                WHERE strategy='NY_OPEN_BR' AND exit_type='TP' AND entry < 2000
                  AND date(exit_time) >= '2026-07-08' LIMIT 1""").fetchone()
         if row is None:
+            for r in c.execute("SELECT id, trade_date, entry_time, exit_time, entry, sl, tp, exit_price, exit_type, pnl_dollar, balance_after FROM trades WHERE strategy='NY_OPEN_BR'").fetchall():
+                log.warning("NY_OPEN_BR row (fix found no match): %s", r)
             return
         trade_id, entry, sl, risk_dollar = row
         spy_close_0707 = 747.71  # SPY 2026-07-07 official close (fixed constant:
